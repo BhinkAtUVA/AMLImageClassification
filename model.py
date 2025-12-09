@@ -100,7 +100,7 @@ if __name__ == "__main__":
 
     torch.manual_seed(args.seed)
 
-    device = torch.device("gpu")
+    device = torch.device("cpu")
 
     transform = transforms.Compose(
         [transforms.ToTensor(),
