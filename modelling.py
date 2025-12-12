@@ -4,10 +4,11 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 import torch
-from torch import device, nn
-from torch.utils.data import DataLoader
+from torch import Tensor, device, nn
+from torch.utils.data import DataLoader, Dataset
 from config import *
 from dataloader import BirdsDataset
+from transformers.modeling_outputs import ImageClassifierOutput
 
 def set_seed(seed: int = 42):
     random.seed(seed)
@@ -125,16 +126,19 @@ def train_model(model: nn.Module, num_epochs=NUM_EPOCHS, batch_size=BATCH_SIZE):
 
     print(f"Best val accuracy: {best_val_acc:.6f} at epoch {best_epoch}")
 
-def val_model(model: nn.Module, device: device, val_dl: DataLoader):
+def val_model(model: nn.Module, device: device, val_dl: DataLoader, verbose=False):
+    if verbose: print("Validation started")
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     model.eval()
     vtotal, vcorrect, vloss_sum = 0, 0, 0.0
+    if verbose: num_batches = len(val_dl)
     with torch.no_grad():
-        for imgs, labels in val_dl:
+        for i, (imgs, labels) in enumerate(val_dl):
             imgs = imgs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
 
             logits = model(imgs)
+            if type(logits) != Tensor: logits = logits.logits
             loss = criterion(logits, labels)
 
             vloss_sum += loss.item() * imgs.size(0)
@@ -142,36 +146,45 @@ def val_model(model: nn.Module, device: device, val_dl: DataLoader):
             vcorrect += (vpreds == labels).sum().item()
             vtotal += labels.size(0)
 
+            if verbose: print(f"Batch {i} of {num_batches} evaluated")
+
     return (vloss_sum / vtotal, vcorrect / vtotal)
 
 
 
-def predict_test(model: nn.Module, batch_size=BATCH_SIZE, model_state=BEST_MODEL_PATH, output_path=SUBMISSION_PATH):
+def predict_test(model: nn.Module, batch_size=BATCH_SIZE, model_state=BEST_MODEL_PATH, output_path=SUBMISSION_PATH, data: Dataset=None, verbose=False):
+    if verbose: print("Test prediction started")
     set_seed(42)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     test_csv = pd.read_csv(TEST_PATHS_CSV)
-    test_ds = BirdsDataset(test_csv, TEST_IMAGES_DIR, TRANSFORM_VAL, False)
+    test_ds = data or BirdsDataset(test_csv, TEST_IMAGES_DIR, TRANSFORM_VAL, False)
     test_dl = DataLoader(test_ds, batch_size=batch_size, shuffle=False,
                          num_workers=4, pin_memory=True)
 
-    model.load_state_dict(torch.load(model_state, map_location=device))
+    if model_state != None: model.load_state_dict(torch.load(model_state, map_location=device))
     model.to(device)
     model.eval()
 
     ids, preds = [], []
 
     with torch.no_grad():
-        for imgs, im_ids in test_dl:
+        if verbose: num_batches = len(test_dl)
+        for i, (imgs, im_ids) in enumerate(test_dl):
             imgs = imgs.to(device, non_blocking=True)
             logits1 = model(imgs)
+            if type(logits1) != Tensor: logits1 = logits1.logits
             imgs_flipped = torch.flip(imgs, dims=[3])  
             logits2 = model(imgs_flipped)
+            if type(logits2) != Tensor: logits2 = logits2.logits
             logits = (logits1 + logits2) / 2.0
             p = logits.argmax(1).cpu().numpy() + 1  
             preds.extend(p.tolist())
             ids.extend(im_ids.numpy().tolist())
+
+            if verbose: print(f"batch {i} of {num_batches} predicted")
+
 
     df = pd.DataFrame({"id": ids, "label": preds})
     df.to_csv(output_path, index=False)

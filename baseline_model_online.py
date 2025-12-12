@@ -8,8 +8,8 @@ from modelling import make_splits, val_model, predict_test
 from transformers import SwinForImageClassification, AutoFeatureExtractor
 
 
-feature_extractor = AutoFeatureExtractor.from_pretrained(BASELINE_DIR)
-model = SwinForImageClassification.from_pretrained(BASELINE_DIR)
+feature_extractor = AutoFeatureExtractor.from_pretrained("Emiel/cub-200-bird-classifier-swin")
+model = SwinForImageClassification.from_pretrained("Emiel/cub-200-bird-classifier-swin")
 def curried_feature_extractor(input):
     return feature_extractor(input, return_tensors="pt").pixel_values.squeeze()
 
