@@ -1,6 +1,6 @@
 from pathlib import Path
 import torch
-from torchvision.transforms import v2
+import torchvision.transforms as T
 
 BASE_DIR = Path("./content")
 
@@ -17,37 +17,34 @@ SUBMISSION_PATH  = BASE_DIR / "result_v4.csv"
 BASELINE_DIR = BASE_DIR / "baseline_model"
 BASELINE_PRED = BASELINE_DIR / "pred.csv"
 
-IMG_SIZE = 224
 NUM_CLASSES = 200
-TRANSFORM_TRAIN = v2.Compose(
-    [
-        v2.ToImage(),
-        v2.Resize((256, 256)),
-        v2.RandomResizedCrop(IMG_SIZE, scale=(0.5, 1.0)),
-        v2.RandomHorizontalFlip(p=0.5),
-        v2.RandomApply([v2.ColorJitter(0.3, 0.3, 0.3, 0.1)], p=0.4),
-        v2.RandomRotation(10),
-        v2.ToDtype(torch.float32),
-        v2.Normalize([0.485, 0.456, 0.406],
-                    [0.229, 0.224, 0.225]),
-        v2.RandomErasing(p=0.25, scale=(0.02, 0.2), ratio=(0.3, 3.3))
-    ]
-)
-TRANSFORM_VAL = v2.Compose(
-    [
-        v2.ToImage(),
-        v2.Resize((IMG_SIZE, IMG_SIZE)),
-        v2.CenterCrop(IMG_SIZE),
-        v2.ToDtype(torch.float32),
-        v2.Normalize([0.485, 0.456, 0.406],
-                    [0.229, 0.224, 0.225]),
-    ]
-)
+IMG_SIZE = 224
 
 # Hyperparams
-NUM_EPOCHS = 200
-BATCH_SIZE = 64
-BASE_LR = 3e-4
-WEIGHT_DECAY = 1e-3
-MIXUP_ALPHA = 0.4
-WARMUP_EPOCHS = 50
+NUM_EPOCHS    = 1000
+BATCH_SIZE    = 64
+BASE_LR       = 3e-4
+WEIGHT_DECAY  = 1e-3
+MIXUP_ALPHA   = 0.4
+WARMUP_EPOCHS = 200
+
+train_transform = T.Compose([
+    T.Resize((256, 256)),
+    T.RandomResizedCrop(IMG_SIZE, scale=(0.5, 1.0), ratio=(0.75, 1.33)),
+    T.RandomHorizontalFlip(p=0.5),
+    T.RandomApply([T.RandomPerspective(distortion_scale=0.3, p=1.0)], p=0.3),
+    T.RandomApply([T.ColorJitter(0.3, 0.3, 0.3, 0.1)], p=0.4),
+    T.RandomRotation(10),
+    T.ToTensor(),
+    T.Normalize([0.485, 0.456, 0.406],
+                [0.229, 0.224, 0.225]),
+    T.RandomErasing(p=0.25, scale=(0.02, 0.2), ratio=(0.3, 3.3)),
+])
+
+val_transform = T.Compose([
+    T.Resize((IMG_SIZE, IMG_SIZE)),
+    T.CenterCrop(IMG_SIZE),
+    T.ToTensor(),
+    T.Normalize([0.485, 0.456, 0.406],
+                [0.229, 0.224, 0.225]),
+])
