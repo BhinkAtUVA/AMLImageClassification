@@ -1,7 +1,7 @@
 from config import *
 from modelling import predict_test, train_model
-from resnet_model import BetterBirdCNN
+from resnet_model import BirdResNet34
 
 if __name__ == "__main__":
-    train_model(BetterBirdCNN, num_epochs=NUM_EPOCHS, batch_size=BATCH_SIZE)
-    predict_test(BetterBirdCNN, batch_size=BATCH_SIZE)
+    train_model(num_epochs=NUM_EPOCHS, batch_size=BATCH_SIZE)
+    predict_test(batch_size=BATCH_SIZE)
