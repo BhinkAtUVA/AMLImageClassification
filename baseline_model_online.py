@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader
 from config import *
 import pandas as pd
 from dataloader import BirdsDataset
-from modelling import make_splits, val_model, predict_test
+from modelling import make_splits, predict_test
 from transformers import SwinForImageClassification, AutoFeatureExtractor
 
 
