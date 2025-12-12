@@ -18,6 +18,33 @@ def set_seed(seed: int = 42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
+def get_cosine_schedule_with_warmup(optimizer, num_warmup_epochs, num_total_epochs):
+    def lr_lambda(epoch):
+        if epoch < num_warmup_epochs:
+            return float(epoch + 1) / float(max(1, num_warmup_epochs))
+        progress = (epoch - num_warmup_epochs) / float(
+            max(1, num_total_epochs - num_warmup_epochs)
+        )
+        return 0.5 * (1.0 + math.cos(math.pi * progress))
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
+
+def mixup_data(x, y, alpha=MIXUP_ALPHA):
+    if alpha <= 0:
+        return x, y, y, 1.0
+    lam = np.random.beta(alpha, alpha)
+    batch_size = x.size(0)
+    index = torch.randperm(batch_size, device=x.device)
+
+    mixed_x = lam * x + (1 - lam) * x[index, :]
+    y_a, y_b = y, y[index]
+    return mixed_x, y_a, y_b, lam
+
+
+def mixup_criterion(criterion, preds, y_a, y_b, lam):
+    return lam * criterion(preds, y_a) + (1 - lam) * criterion(preds, y_b)
+
+
 def make_splits():
     if TRAIN_SPLIT_CSV.exists() and VAL_SPLIT_CSV.exists():
         return
@@ -33,37 +60,12 @@ def make_splits():
     val.to_csv(VAL_SPLIT_CSV, index=False)
 
 
-def get_cosine_schedule_with_warmup(optimizer, num_warmup_epochs, num_total_epochs):
-    def lr_lambda(epoch):
-        if epoch < num_warmup_epochs:
-            return float(epoch + 1) / float(max(1, num_warmup_epochs))
-        progress = (epoch - num_warmup_epochs) / float(
-            max(1, num_total_epochs - num_warmup_epochs)
-        )
-        return 0.5 * (1.0 + math.cos(math.pi * progress))
-    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-
-def mixup_data(x, y, alpha=MIXUP_ALPHA):
-    if alpha <= 0:
-        return x, y, y, 1.0
-    lam = np.random.beta(alpha, alpha)
-    batch_size = x.size(0)
-    index = torch.randperm(batch_size, device=x.device)
-
-    mixed_x = lam * x + (1 - lam) * x[index, :]
-    y_a, y_b = y, y[index]
-    return mixed_x, y_a, y_b, lam
-
-def mixup_criterion(criterion, preds, y_a, y_b, lam):
-    return lam * criterion(preds, y_a) + (1 - lam) * criterion(preds, y_b)
-
-
-def train_model(model: nn.Module, num_epochs=NUM_EPOCHS, batch_size=BATCH_SIZE):
+def train_model(num_epochs=NUM_EPOCHS, batch_size=BATCH_SIZE):
     set_seed(42)
     make_splits()
 
-    train_ds = BirdsDataset(TRAIN_SPLIT_CSV, TRAIN_IMAGES_DIR, TRANSFORM_TRAIN, True)
-    val_ds   = BirdsDataset(VAL_SPLIT_CSV,   TRAIN_IMAGES_DIR, TRANSFORM_VAL, True)
+    train_ds = BirdsDataset(TRAIN_SPLIT_CSV, TRAIN_IMAGES_DIR, train_transform, True)
+    val_ds   = BirdsDataset(VAL_SPLIT_CSV,   TRAIN_IMAGES_DIR, val_transform,   True)
 
     train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
                           num_workers=4, pin_memory=True)
@@ -71,12 +73,12 @@ def train_model(model: nn.Module, num_epochs=NUM_EPOCHS, batch_size=BATCH_SIZE):
                           num_workers=4, pin_memory=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
 
+    model = BirdResNet34(NUM_CLASSES).to(device)
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-    optimizer = torch.optim.AdamW(model.parameters(),
-                                  lr=BASE_LR,
-                                  weight_decay=WEIGHT_DECAY)
+    optimizer = torch.optim.AdamW(
+        model.parameters(), lr=BASE_LR, weight_decay=WEIGHT_DECAY
+    )
     scheduler = get_cosine_schedule_with_warmup(
         optimizer,
         num_warmup_epochs=WARMUP_EPOCHS,
@@ -93,6 +95,7 @@ def train_model(model: nn.Module, num_epochs=NUM_EPOCHS, batch_size=BATCH_SIZE):
         for imgs, labels in train_dl:
             imgs = imgs.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
+
             imgs_m, targets_a, targets_b, lam = mixup_data(imgs, labels, MIXUP_ALPHA)
 
             optimizer.zero_grad()
@@ -110,7 +113,24 @@ def train_model(model: nn.Module, num_epochs=NUM_EPOCHS, batch_size=BATCH_SIZE):
         train_loss = loss_sum / total
         train_acc = correct / total
 
-        val_loss, val_acc = val_model(model, device, val_dl)
+        model.eval()
+        vtotal, vcorrect, vloss_sum = 0, 0, 0.0
+        with torch.no_grad():
+            for imgs, labels in val_dl:
+                imgs = imgs.to(device, non_blocking=True)
+                labels = labels.to(device, non_blocking=True)
+
+                logits = model(imgs)
+                loss = criterion(logits, labels)
+
+                vloss_sum += loss.item() * imgs.size(0)
+                vpreds = logits.argmax(1)
+                vcorrect += (vpreds == labels).sum().item()
+                vtotal += labels.size(0)
+
+        val_loss = vloss_sum / vtotal
+        val_acc = vcorrect / vtotal
+
         scheduler.step()
 
         print(
@@ -126,65 +146,45 @@ def train_model(model: nn.Module, num_epochs=NUM_EPOCHS, batch_size=BATCH_SIZE):
 
     print(f"Best val accuracy: {best_val_acc:.6f} at epoch {best_epoch}")
 
-def val_model(model: nn.Module, device: device, val_dl: DataLoader, verbose=False):
-    if verbose: print("Validation started")
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-    model.eval()
-    vtotal, vcorrect, vloss_sum = 0, 0, 0.0
-    if verbose: num_batches = len(val_dl)
-    with torch.no_grad():
-        for i, (imgs, labels) in enumerate(val_dl):
-            imgs = imgs.to(device, non_blocking=True)
-            labels = labels.to(device, non_blocking=True)
 
-            logits = model(imgs)
-            if type(logits) != Tensor: logits = logits.logits
-            loss = criterion(logits, labels)
-
-            vloss_sum += loss.item() * imgs.size(0)
-            vpreds = logits.argmax(1)
-            vcorrect += (vpreds == labels).sum().item()
-            vtotal += labels.size(0)
-
-            if verbose: print(f"Batch {i} of {num_batches} evaluated")
-
-    return (vloss_sum / vtotal, vcorrect / vtotal)
+def create_test_csv():
+    sample = pd.read_csv(TEST_SAMPLE_CSV)
+    paths  = pd.read_csv(TEST_PATHS_CSV)
+    merged = sample[["id"]].merge(paths, on="id", how="left")
+    out = BASE_DIR / "test_final_paths.csv"
+    merged.to_csv(out, index=False)
+    return out
 
 
-
-def predict_test(model: nn.Module, batch_size=BATCH_SIZE, model_state=BEST_MODEL_PATH, output_path=SUBMISSION_PATH, data: Dataset=None, verbose=False):
-    if verbose: print("Test prediction started")
+def predict_test(batch_size=BATCH_SIZE):
     set_seed(42)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    test_csv = pd.read_csv(TEST_PATHS_CSV)
-    test_ds = data or BirdsDataset(test_csv, TEST_IMAGES_DIR, TRANSFORM_VAL, False)
+    test_csv = create_test_csv()
+    test_ds = BirdsDataset(test_csv, TEST_IMAGES_DIR, val_transform, is_train=False)
     test_dl = DataLoader(test_ds, batch_size=batch_size, shuffle=False,
                          num_workers=4, pin_memory=True)
 
-    if model_state != None: model.load_state_dict(torch.load(model_state, map_location=device))
+    model = BirdResNet34(NUM_CLASSES)
+    model.load_state_dict(torch.load(BEST_MODEL_PATH, map_location=device))
     model.to(device)
     model.eval()
 
     ids, preds = [], []
 
     with torch.no_grad():
-        if verbose: num_batches = len(test_dl)
-        for i, (imgs, im_ids) in enumerate(test_dl):
+        for imgs, im_ids in test_dl:
             imgs = imgs.to(device, non_blocking=True)
             logits1 = model(imgs)
-            if type(logits1) != Tensor: logits1 = logits1.logits
-            imgs_flipped = torch.flip(imgs, dims=[3])  
+            imgs_flipped = torch.flip(imgs, dims=[3])
             logits2 = model(imgs_flipped)
-            if type(logits2) != Tensor: logits2 = logits2.logits
+
             logits = (logits1 + logits2) / 2.0
-            p = logits.argmax(1).cpu().numpy() + 1  
+            p = logits.argmax(1).cpu().numpy() + 1
+
             preds.extend(p.tolist())
             ids.extend(im_ids.numpy().tolist())
 
-            if verbose: print(f"batch {i} of {num_batches} predicted")
-
-
     df = pd.DataFrame({"id": ids, "label": preds})
-    df.to_csv(output_path, index=False)
+    df.to_csv(SUBMISSION_PATH, index=False)
