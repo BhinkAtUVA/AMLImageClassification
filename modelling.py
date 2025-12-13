@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader, Dataset
 from config import *
 from dataloader import BirdsDataset
 from transformers.modeling_outputs import ImageClassifierOutput
+from resnet_model import BirdResNet34
 
 def set_seed(seed: int = 42):
     random.seed(seed)
