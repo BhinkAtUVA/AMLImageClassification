@@ -14,6 +14,17 @@ VAL_SPLIT_CSV    = BASE_DIR / "val_split.csv"
 BEST_MODEL_PATH  = BASE_DIR / "result_v4.pth"
 SUBMISSION_PATH  = BASE_DIR / "result_v4.csv"
 
+ANALYSIS_DIR            = BASE_DIR / "analysis_outputs"
+LEARNING_CURVES_CSV     = ANALYSIS_DIR / "learning_curves.csv"
+LEARNING_CURVES_PNG     = ANALYSIS_DIR / "learning_curves.png"
+VAL_PRED_CSV            = ANALYSIS_DIR / "val_predictions.csv"
+PER_CLASS_METRICS_CSV   = ANALYSIS_DIR / "per_class_metrics.csv"
+CONFUSED_PAIRS_CSV      = ANALYSIS_DIR / "most_confused_pairs.csv"
+CONF_HIST_PNG           = ANALYSIS_DIR / "confidence_hist.png"
+CALIBRATION_BINS_CSV    = ANALYSIS_DIR / "calibration_bins.csv"
+CALIBRATION_PNG         = ANALYSIS_DIR / "calibration_plot.png"
+MISCLASS_DIR            = ANALYSIS_DIR / "misclassified_examples"
+
 BASELINE_DIR = BASE_DIR / "baseline_model"
 BASELINE_PRED = BASELINE_DIR / "pred.csv"
 
