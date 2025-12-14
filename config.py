@@ -20,13 +20,17 @@ BASELINE_PRED = BASELINE_DIR / "pred.csv"
 NUM_CLASSES = 200
 IMG_SIZE = 224
 
-# Hyperparams
 NUM_EPOCHS    = 1000
 BATCH_SIZE    = 64
 BASE_LR       = 3e-4
 WEIGHT_DECAY  = 1e-3
 MIXUP_ALPHA   = 0.4
-WARMUP_EPOCHS = 200
+WARMUP_EPOCHS = 50
+
+# EMA hyperparams
+USE_EMA = True
+EMA_DECAY = 0.999
+EMA_WARMUP_EPOCHS = 1
 
 train_transform = T.Compose([
     T.Resize((256, 256)),
@@ -44,6 +48,13 @@ train_transform = T.Compose([
 val_transform = T.Compose([
     T.Resize((IMG_SIZE, IMG_SIZE)),
     T.CenterCrop(IMG_SIZE),
+    T.ToTensor(),
+    T.Normalize([0.485, 0.456, 0.406],
+                [0.229, 0.224, 0.225]),
+])
+
+tta_base = T.Compose([
+    T.Resize((256, 256)),
     T.ToTensor(),
     T.Normalize([0.485, 0.456, 0.406],
                 [0.229, 0.224, 0.225]),
